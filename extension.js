@@ -22,7 +22,6 @@ const GETTEXT_DOMAIN = 'simple-monitor@JnCrMx.github.io';
 
 import GObject from 'gi://GObject';
 import St from 'gi://St';
-import * as Util from 'resource:///org/gnome/shell/misc/util.js';
 import Clutter from 'gi://Clutter';
 import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
