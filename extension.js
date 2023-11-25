@@ -18,32 +18,40 @@
 
 /* exported init */
 
-const GETTEXT_DOMAIN = 'example';
+const GETTEXT_DOMAIN = 'simple-monitor@JnCrMx.github.io';
 
-const { GObject, St } = imports.gi;
-const Util = imports.misc.util;
+import GObject from 'gi://GObject';
+import St from 'gi://St';
+import * as Util from 'resource:///org/gnome/shell/misc/util.js';
+import Clutter from 'gi://Clutter';
+import GLib from 'gi://GLib';
+import Gio from 'gi://Gio';
 
-const Clutter = imports.gi.Clutter;
+import {Extension, gettext as _} from 'resource:///org/gnome/shell/extensions/extension.js';
 
-const GLib = imports.gi.GLib;
+import * as Main from 'resource:///org/gnome/shell/ui/main.js';
+import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
+import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
-const Gio = imports.gi.Gio;
-const Lang = imports.lang;
-const ByteArray = imports.byteArray;
+export default class SimpleMonitorExtension extends Extension {
+    constructor(metadata) {
+        super(metadata);
 
-const Mainloop = imports.mainloop;
+        this.initTranslations(GETTEXT_DOMAIN);
+    }
 
-const ExtensionUtils = imports.misc.extensionUtils;
-const Me = ExtensionUtils.getCurrentExtension();
+    enable() {
+        console.debug(_('Enabling %s').format(this.metadata.name));
+        this._indicator = new Indicator(this.path, this.getSettings(), ()=>{this.openPreferences();});
+        Main.panel.addToStatusArea(this.uuid, this._indicator);
+    }
 
-const Gettext = imports.gettext;
-Gettext.textdomain('example');
-Gettext.bindtextdomain('example',Me.dir.get_child('locale').get_path());
-
-const _ = Gettext.gettext;
-const Main = imports.ui.main;
-const PanelMenu = imports.ui.panelMenu;
-const PopupMenu = imports.ui.popupMenu;
+    disable() {
+        console.debug(_('Disabling %s').format(this.metadata.name));
+        this._indicator?.destroy();
+        this._indicator = null;
+    }
+}
 
 /**
  * Function taken from Andy Holmes @ andyholmes[dot]ca
@@ -71,7 +79,7 @@ async function execCommunicate(argv, input = null, cancellable = null) {
       flags: flags
   });
   proc.init(cancellable);
-  
+
   if (cancellable instanceof Gio.Cancellable) {
       cancelId = cancellable.connect(() => proc.force_exit());
   }
@@ -103,10 +111,8 @@ async function execCommunicate(argv, input = null, cancellable = null) {
 
 const Indicator = GObject.registerClass(
 class Indicator extends PanelMenu.Button {
-    _init() {
+    _init(path, settings, openPreferences) {
         super._init(0.0, _('Simple Monitor'));
-
-        let _settings = ExtensionUtils.getSettings();
 
         let timeCounter = 0;
 
@@ -123,7 +129,7 @@ class Indicator extends PanelMenu.Button {
         }
 
         //Icons
-        let cpuGioIcon = Gio.icon_new_for_string(Me.path + '/icons/cpu-symbolic.svg');
+        let cpuGioIcon = Gio.icon_new_for_string(path + '/icons/cpu-symbolic.svg');
         let cpuIcon = new St.Icon({
           gicon: cpuGioIcon,
           style_class: 'system-status-icon',
@@ -132,7 +138,7 @@ class Indicator extends PanelMenu.Button {
           y_align: Clutter.ActorAlign.CENTER,
           y_expand: true
         });
-        let memGioIcon = Gio.icon_new_for_string(Me.path + '/icons/mem-symbolic.svg');
+        let memGioIcon = Gio.icon_new_for_string(path + '/icons/mem-symbolic.svg');
         let memIcon = new St.Icon({
           gicon: memGioIcon,
           style_class: 'system-status-icon',
@@ -171,13 +177,11 @@ class Indicator extends PanelMenu.Button {
         //Buttons
         let refreshButton = new PopupMenu.PopupBaseMenuItem();
         refreshButton.actor.add_child(new St.Label({ text: _("Settings"), x_align: Clutter.ActorAlign.CENTER, x_expand: true }));
-        refreshButton.connect('activate', function () {
-            Util.spawn(["gnome-extensions", "prefs", Me.metadata.uuid]);
-        });
+        refreshButton.connect('activate', ()=>{openPreferences()});
         //Main Update function
         function Update() {
 
-            let cycles = _settings.get_int('sec-update');
+            let cycles = settings.get_int('sec-update');
             //log(cycles);
             if (cycles < 1) cycles = 1;
             if (cycles > 10) cycles = 10;
@@ -210,7 +214,7 @@ class Indicator extends PanelMenu.Button {
             let lines = result.split("\n");
             let freeSpl = lines[1].split(/[ ]+/);
             let lblStr = '';
-            if (_settings.get_boolean('mem-perc')) {
+            if (settings.get_boolean('mem-perc')) {
                 let percmem = parseFloat(freeSpl[2])*100.0/parseFloat(freeSpl[1]);
                 lblStr = ('  '+percmem.toFixed(1)+'%').slice(-6);
             }
@@ -220,7 +224,7 @@ class Indicator extends PanelMenu.Button {
             memPanelLabel.set_text(lblStr);
             });
 
-            if (_settings.get_boolean('top-or-ps')) {
+            if (settings.get_boolean('top-or-ps')) {
                 let cpuPOut = execCommunicate(['top', '-b', '-n', '1', '-o', '%CPU', '-w', '100']);
                 cpuPOut.then(function(result) {
                     let lines = result.split("\n");
@@ -307,41 +311,18 @@ class Indicator extends PanelMenu.Button {
 
         Update();
 
-        this._eventLoop = Mainloop.timeout_add(500, Lang.bind(this, function (){
+        this._eventLoop = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 500, ()=>{
             Update();
             return true;
-        }));
-    }
-
-    _settingsChanged() {
-        this.Update();
+        });
+        settings.connect('changed::sec-update', ()=>{Update()});
+        settings.connect('changed::mem-perc', ()=>{Update()});
+        settings.connect('changed::top-or-ps', ()=>{Update()});
     }
 
     _onDestroy(){
-        Mainloop.source_remove(this._eventLoop);
+        GLib.Source.remove(this._eventLoop);
         this.menu.removeAll();
         super._onDestroy();
     }
 });
-
-class Extension {
-    constructor(uuid) {
-        this._uuid = uuid;
-
-        ExtensionUtils.initTranslations(GETTEXT_DOMAIN);
-    }
-
-    enable() {
-        this._indicator = new Indicator();
-        Main.panel.addToStatusArea(this._uuid, this._indicator);
-    }
-
-    disable() {
-        this._indicator.destroy();
-        this._indicator = null;
-    }
-}
-
-function init(meta) {
-    return new Extension(meta.uuid);
-}
